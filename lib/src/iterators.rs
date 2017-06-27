@@ -2,7 +2,7 @@ use hex::FromHex;
 
 use slog::Logger;
 
-use std::fs;
+use std::{fs, io};
 use std::fs::ReadDir;
 use std::io::Result;
 use std::path::Path;
@@ -19,15 +19,17 @@ pub struct StoredChunks {
 
 impl StoredChunks {
     pub fn new(
-        root: &Path,
+        asio: &asyncio::AsyncIO,
         digest_size: usize,
         log: Logger,
     ) -> Result<StoredChunks> {
+        let dir = asio::list(PathBuf::from(".")).wait()?;
+
         Ok(StoredChunks {
-            dirs: vec![fs::read_dir(root)?],
+            dirs: vec![dir],
             digest_size: digest_size,
             log: log,
-        })
+        }),
     }
 }
 

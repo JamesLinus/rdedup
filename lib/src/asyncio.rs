@@ -26,6 +26,7 @@ enum Message {
     Write(PathBuf, SGData, bool, Option<mpsc::Sender<io::Result<()>>>),
     #[allow(unused)]
     Read(PathBuf, mpsc::Sender<io::Result<SGData>>),
+    List(PathBuf, mpsc::Sender<io::Result<Vec<PathBuf>>>),
 }
 
 /// A handle to a async-io worker pool
@@ -73,6 +74,14 @@ impl AsyncIO {
 
     pub fn stats(&self) -> AsyncIOThreadShared {
         self.shared.stats.clone()
+    }
+
+    pub fn list(&self, path: PathBuf) -> AsyncIOResult<Vec<PathBuf>> {
+        let (tx, rx) = mpsc::channel();
+        self.tx
+            .send(Message::List(path, tx))
+            .expect("channel send failed");
+        AsyncIOResult { rx: rx }
     }
 
     pub fn write(&self, path: PathBuf, sg: SGData) -> AsyncIOResult<()> {
@@ -235,6 +244,7 @@ impl AsyncIOThread {
                         self.write(path, sg, idempotent, tx)
                     }
                     Message::Read(path, tx) => self.read(path, tx),
+                    Message::List(path, tx) => self.list(path, tx),
                 }
             } else {
                 break;
@@ -382,6 +392,38 @@ impl AsyncIOThread {
             }
             buf.truncate(len);
             bufs.push(buf);
+        }
+    }
+
+    fn list(&mut self, path: PathBuf, tx: mpsc::Sender<io::Result<Vec<PathBuf>>>) {
+
+        trace!(self.log, "list"; "path" => %path.display());
+
+        let path = self.root_path.join(path);
+
+        let res = self.list_inner(path);
+        self.time_reporter.start("list send response");
+        tx.send(res).expect("send failed")
+    }
+
+    fn list_inner(&mut self, path: PathBuf) -> io::Result<Vec<PathBuf>> {
+
+        self.time_reporter.start("list");
+
+        let mut v = vec!();
+
+        let dir = fs::read_dir(path);
+
+        match dir {
+            Ok(dir) =>{
+                for entry in dir {
+                    let entry = entry?;
+                    v.push(entry.path());
+                }
+                Ok(v)
+            },
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => Ok(vec!()),
+            Err(e) => Err(e)
         }
     }
 }

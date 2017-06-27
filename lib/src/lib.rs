@@ -37,7 +37,7 @@ use std::{io, fs};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::error::Error as StdErrorError;
-use std::io::{BufRead, Read, Write, Result, Error};
+use std::io::{Read, Write, Result, Error};
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 
@@ -559,26 +559,17 @@ impl Repo {
         &self.path
     }
 
-    fn ensure_repo_empty_or_new(repo_path: &Path) -> Result<()> {
-        if repo_path.exists() && fs::read_dir(repo_path)?.next().is_some() {
+    fn ensure_repo_empty_or_new(aio : &AsyncIO) -> Result<()> {
+        let list = aio.list(PathBuf::from(".")).wait();
+
+        if !list.is_err() && !list.unwrap().is_empty() {
             return Err(Error::new(
                 io::ErrorKind::AlreadyExists,
                 format!(
-                    "{} must not exist or be empty to be used",
-                    repo_path.to_string_lossy()
+                    "repo dir must not exist or be empty to be used"
                 ),
             ));
         }
-        Ok(())
-    }
-
-    fn init_common_dirs(repo_path: &Path) -> Result<()> {
-        // Workaround https://github.com/rust-lang/rust/issues/33707
-        let _ = fs::create_dir_all(&repo_path.join(repo_path));
-
-        fs::create_dir_all(&repo_path.join(config::DATA_SUBDIR))?;
-        fs::create_dir_all(&repo_path.join(config::INDEX_SUBDIR))?;
-        fs::create_dir_all(&repo_path.join(config::NAME_SUBDIR))?;
         Ok(())
     }
 
@@ -597,8 +588,7 @@ impl Repo {
 
         let aio = asyncio::AsyncIO::new(repo_path.to_owned(), log.clone());
 
-        Repo::ensure_repo_empty_or_new(repo_path)?;
-        Repo::init_common_dirs(repo_path)?;
+        Repo::ensure_repo_empty_or_new(&aio)?;
         let config = config::Repo::new_from_settings(passphrase, settings)?;
         config.write(&aio)?;
 
@@ -615,13 +605,11 @@ impl Repo {
 
     #[allow(unknown_lints)]
     #[allow(absurd_extreme_comparisons)]
-    fn read_and_validate_version(repo_path: &Path) -> Result<u32> {
-        let version_path = config::version_file_path(repo_path);
-        let mut file = fs::File::open(&version_path)?;
+    fn read_and_validate_version(aio : &AsyncIO) -> Result<u32> {
 
-        let mut reader = io::BufReader::new(&mut file);
-        let mut version = String::new();
-        reader.read_line(&mut version)?;
+        let version = aio.read(PathBuf::from(config::VERSION_FILE)).wait()?.to_linear_vec();
+        let version = String::from_utf8_lossy(&version);
+
         let version_int = version.parse::<u32>().map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -687,7 +675,7 @@ impl Repo {
             ));
         }
 
-        let version = Repo::read_and_validate_version(repo_path)?;
+        let version = Repo::read_and_validate_version(&aio)?;
 
         if version == 0 {
             return Err(Error::new(
@@ -960,16 +948,8 @@ impl Repo {
 
     /// List all names
     fn list_names_nolock(&self) -> Result<Vec<String>> {
-        let mut ret: Vec<String> = vec![];
-
-        let name_dir = self.name_dir_path();
-        for entry in fs::read_dir(name_dir)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            ret.push(name)
-        }
-
-        Ok(ret)
+        let list = self.aio.list(PathBuf::from(config::NAME_SUBDIR)).wait()?;
+        Ok(list.iter().map(|e| e.to_string_lossy().to_string()).collect())
     }
 
 
