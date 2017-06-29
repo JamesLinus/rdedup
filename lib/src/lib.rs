@@ -22,6 +22,7 @@ extern crate slog_perf;
 extern crate hex;
 extern crate sgdata;
 extern crate dangerous_option;
+extern crate walkdir;
 
 use fs2::FileExt;
 
@@ -559,15 +560,13 @@ impl Repo {
         &self.path
     }
 
-    fn ensure_repo_empty_or_new(aio : &AsyncIO) -> Result<()> {
+    fn ensure_repo_empty_or_new(aio: &AsyncIO) -> Result<()> {
         let list = aio.list(PathBuf::from(".")).wait();
 
         if !list.is_err() && !list.unwrap().is_empty() {
             return Err(Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!(
-                    "repo dir must not exist or be empty to be used"
-                ),
+                format!("repo dir must not exist or be empty to be used"),
             ));
         }
         Ok(())
@@ -605,9 +604,11 @@ impl Repo {
 
     #[allow(unknown_lints)]
     #[allow(absurd_extreme_comparisons)]
-    fn read_and_validate_version(aio : &AsyncIO) -> Result<u32> {
+    fn read_and_validate_version(aio: &AsyncIO) -> Result<u32> {
 
-        let version = aio.read(PathBuf::from(config::VERSION_FILE)).wait()?.to_linear_vec();
+        let version = aio.read(PathBuf::from(config::VERSION_FILE))
+            .wait()?
+            .to_linear_vec();
         let version = String::from_utf8_lossy(&version);
 
         let version_int = version.parse::<u32>().map_err(|_| {
@@ -949,7 +950,11 @@ impl Repo {
     /// List all names
     fn list_names_nolock(&self) -> Result<Vec<String>> {
         let list = self.aio.list(PathBuf::from(config::NAME_SUBDIR)).wait()?;
-        Ok(list.iter().map(|e| e.to_string_lossy().to_string()).collect())
+        Ok(
+            list.iter()
+                .map(|e| e.to_string_lossy().to_string())
+                .collect(),
+        )
     }
 
 
@@ -1029,14 +1034,6 @@ impl Repo {
         self.path.join(config::NAME_SUBDIR)
     }
 
-    fn index_dir_path(&self) -> PathBuf {
-        self.path.join(config::INDEX_SUBDIR)
-    }
-
-    fn chunk_dir_path(&self) -> PathBuf {
-        self.path.join(config::DATA_SUBDIR)
-    }
-
     fn name_path(&self, name: &str) -> PathBuf {
         self.name_dir_path().join(name)
     }
@@ -1053,12 +1050,14 @@ impl Repo {
 
         let reachable = self.list_reachable_chunks().unwrap();
         let index_chunks = StoredChunks::new(
-            &self.index_dir_path(),
+            &self.aio,
+            PathBuf::from(config::INDEX_SUBDIR),
             DIGEST_SIZE,
             self.log.clone(),
         )?;
         let data_chunks = StoredChunks::new(
-            &self.chunk_dir_path(),
+            &self.aio,
+            PathBuf::from(config::DATA_SUBDIR),
             DIGEST_SIZE,
             self.log.clone(),
         )?;

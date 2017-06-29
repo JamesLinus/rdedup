@@ -15,6 +15,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Result, Write};
 use std::path;
+use std::path::PathBuf;
 
 const PASS: &'static str = "FOO";
 const DIGEST_SIZE: usize = 32;
@@ -32,12 +33,14 @@ fn rand_tmp_dir() -> path::PathBuf {
 fn list_stored_chunks(repo: &lib::Repo) -> Result<HashSet<Vec<u8>>> {
     let mut digests = HashSet::new();
     let index_chunks = StoredChunks::new(
-        &repo.index_dir_path(),
+        &repo.aio,
+        PathBuf::from(super::config::INDEX_SUBDIR),
         DIGEST_SIZE,
         repo.log.clone(),
     )?;
     let data_chunks = StoredChunks::new(
-        &repo.chunk_dir_path(),
+        &repo.aio,
+        PathBuf::from(super::config::DATA_SUBDIR),
         DIGEST_SIZE,
         repo.log.clone(),
     )?;
